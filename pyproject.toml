@@ -15,10 +15,15 @@ dependencies = [
 ]
 
 # torch is selected per machine: `uv sync --extra cpu` (default everywhere, what the orb and
-# the capture tool use) or `uv sync --extra rocm` (AMD RX 9070 XT / gfx1201 training box).
+# the capture tool use), `uv sync --extra rocm` (AMD RX 9070 XT / gfx1201 training box) or
+# `uv sync --extra cuda` (NVIDIA, CUDA 12.6 wheels: Turing/RTX 20 and newer, driver 525 or later).
 # The extras conflict, so exactly one must be enabled; `uv run` without --extra installs no torch.
 [project.optional-dependencies]
 cpu = [
+    "torch>=2.4",
+    "torchvision>=0.19",
+]
+cuda = [
     "torch>=2.4",
     "torchvision>=0.19",
 ]
@@ -44,6 +49,7 @@ package = true
 conflicts = [
     [
         { extra = "cpu" },
+        { extra = "cuda" },
         { extra = "rocm" },
     ],
 ]
@@ -51,10 +57,12 @@ conflicts = [
 [tool.uv.sources]
 torch = [
     { index = "pytorch-cpu", extra = "cpu" },
+    { index = "pytorch-cu126", extra = "cuda" },
     { index = "amd-rocm", extra = "rocm" },
 ]
 torchvision = [
     { index = "pytorch-cpu", extra = "cpu" },
+    { index = "pytorch-cu126", extra = "cuda" },
     { index = "amd-rocm", extra = "rocm" },
 ]
 # The ROCm torch wheel's own dependencies (bundled ROCm runtime + gfx1201 kernels) only exist
@@ -72,6 +80,11 @@ triton = { index = "amd-rocm", extra = "rocm" }
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
 explicit = true
 
 [[tool.uv.index]]
