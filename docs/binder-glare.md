@@ -112,9 +112,16 @@ mise run publish -- data/bundles/retrain-<time> --to ~/mtgvault-bundles
 ```
 
 The folder now holds `<version>/` and a `current` link. Copy it to the MTG Vault server however
-suits you (rsync, a shared drive), then as a staff user open MTG Vault's **Settings → Scanner
-model**, choose **Server folder**, enter the folder's path on the server and **Save**: it
-installs the newest bundle in the folder at once and the daily sync keeps following it.
+suits you (rsync, a shared drive). With MTG Vault's Docker setup, put it in `./data/app/bundles`
+(the container sees `/data/bundles`):
+
+```sh
+rsync -a ~/mtgvault-bundles/ <server>:<mtgvault>/data/app/bundles/
+```
+
+Then as a staff user open MTG Vault's **Settings → Scanner model**, choose **Server folder**,
+enter the path as the server sees it (`/data/bundles`) and **Save**: it installs the newest
+bundle in the folder at once and the daily sync keeps following it.
 Switching back to **GitHub releases** (`cfbender/manavault`) restores ManaVault's models.
 
 Later runs can publish straight away: `mise run mtgvault` publishes only when the new bundle is
