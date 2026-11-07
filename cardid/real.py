@@ -35,7 +35,8 @@ def split_for(capture_id: str) -> str:
     return "eval" if int(hashlib.sha1(capture_id.encode()).hexdigest(), 16) % 5 == 0 else "train"
 
 
-def load_labels(split: str | None = None) -> list[dict]:
+def load_labels(split: str | None = None, all_sources: bool = False) -> list[dict]:
+    """Labelled captures with a card.png, last label winning; only CARDID_SOURCES unless `all_sources`."""
     if not LABELS.exists():
         return []
     rows = [json.loads(line) for line in LABELS.read_text().splitlines() if line.strip()]
@@ -44,7 +45,8 @@ def load_labels(split: str | None = None) -> list[dict]:
     for r in rows:
         latest[r["capture_id"]] = r
     # .get: skipped captures may carry no label at all (older ManaVault exports).
-    out = keep([r for r in latest.values() if r.get("label") and (REAL_DIR / r["capture_id"] / "card.png").exists()])
+    out = [r for r in latest.values() if r.get("label") and (REAL_DIR / r["capture_id"] / "card.png").exists()]
+    out = out if all_sources else keep(out)
     # eval-only sources never reach training, whatever split an older row recorded
     out = [{**r, "split": "eval"} if row_source(r) in EVAL_ONLY else r for r in out]
     if split:

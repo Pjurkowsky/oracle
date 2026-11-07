@@ -4,7 +4,7 @@ Spec: [spec.md](spec.md)
 
 | Topic | Choice |
 |---|---|
-| Glare | `degrade.binder_glare(img, rng, mask)`: hot spot (super-Gaussian blob or streak, +150-320, clipped at 255), haze (blend towards a pale veil, 15-50%), overexposure (gain 1.3-2.0, clipped). One kind, sometimes two. Applied after photometrics, before optics. |
+| Glare | `degrade.binder_glare(img, rng, mask)`: hot spot (super-Gaussian blob or streak, +150-320, clipped at 255), haze (blend towards a pale veil, 15-50%), overexposure (gain 1.2-1.8, clipped). One kind, sometimes two. Applied after photometrics, before optics. |
 | Profiles | `Degradation.binder_p`; `harsh-binder` = harsh + 0.3 (training), `binder` = realistic + 1.0 (eval). `train --degradation`. |
 | CUDA | `cuda` extra on the PyTorch cu126 index, conflicting with `cpu` and `rocm`. |
 | Photo mode | `capture --photos`: `/mode` tells the page; page draws the picked file letterboxed into a 640 canvas (rgb 18) and crops from it. Server saves `source: binder-photos`, `split: eval`. |

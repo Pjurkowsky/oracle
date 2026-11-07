@@ -104,7 +104,7 @@ def binder_glare(img: np.ndarray, rng: np.random.Generator, mask: np.ndarray | N
             amount = np.clip(rng.uniform(0.15, 0.5) * (1 + rng.uniform(0, 0.8) * ramp), 0, 0.75) * weight
             out = out * (1 - amount[..., None]) + veil * amount[..., None]
         else:
-            gain = rng.uniform(1.3, 2.0)
+            gain = rng.uniform(1.2, 1.8)
             lifted = out * gain + rng.uniform(0, 30)
             out = out + (lifted - out) * weight[..., None]
     return np.clip(out, 0, 255), kinds
