@@ -225,6 +225,26 @@ class RetrainTest(unittest.TestCase):
         state = json.loads((self.data / "nightly" / "state.json").read_text())
         self.assertEqual((state["checkpoint"], state["detector"], state["corrections"]), (checkpoint, str(self.detector), "already-seen"))
 
+    def test_mtgvault_profile_trains_with_binder_glare_and_ships_the_reused_detector(self):
+        """Spec 001 AC-10: CARDID_DEGRADATION and CARDID_DETECTOR_ONNX reach train, export and evaluate."""
+        graph = self.write(self.root / "manavault" / "detector.onnx", b"graph")
+        with patch.dict(os.environ, {"CARDID_DEGRADATION": "harsh-binder", "CARDID_DETECTOR_ONNX": str(graph)}):
+            report = self.run_pipeline()
+        checkpoint = str(self.runs / "retrain-test" / "best.pt")
+        train = next(c for c in self.commands if c[2] == "cardid.train")
+        export = next(c for c in self.commands if c[2] == "cardid.export")
+        evaluations = [c[-1] for c in self.commands if c[2] == "cardid.evaluate"]
+        self.assertEqual(train[-2:], ("--degradation", "harsh-binder"))
+        self.assertEqual(export[-2:], ("--detector-onnx", str(graph)))
+        self.assertEqual(evaluations, ["realistic", "binder"])
+        self.assertEqual((report["degradation"], report["detector_onnx"], report["candidate_checkpoint"]), ("harsh-binder", str(graph), checkpoint))
+
+    def test_unknown_degradation_and_missing_detector_graph_are_refused(self):
+        with patch.dict(os.environ, {"CARDID_DEGRADATION": "glossy"}), self.assertRaises(SystemExit), patch("sys.stderr"):
+            self.args()
+        with patch.dict(os.environ, {"CARDID_DETECTOR_ONNX": str(self.root / "absent.onnx")}), self.assertRaises(SystemExit), patch("sys.stderr"):
+            self.args()
+
     def test_missing_destination_fails_before_pulling(self):
         self.ssh_exit = 1
         with self.assertRaisesRegex(SystemExit, "not a directory there"):

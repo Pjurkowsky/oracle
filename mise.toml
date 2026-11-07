@@ -50,3 +50,23 @@ run = "uv run --no-sync python -m cardid.promote"
 [tasks.new-set]
 description = "New set released: refresh the gallery once, then re-export and publish every app's model with it."
 run = "uv run --no-sync python -m cardid.new_set"
+
+[tasks.setup-mtgvault]
+description = "Create ~/.config/cardid/mtgvault.env from profiles/ (an existing file is kept)."
+run = '''
+mkdir -p ~/.config/cardid
+target=~/.config/cardid/mtgvault.env
+if [ -e "$target" ]; then echo "kept $target"; else install -m 600 profiles/mtgvault.env.example "$target"; echo "created $target"; fi
+'''
+
+[tasks.mtgvault]
+description = "Train MTG Vault's binder model: binder glare, ManaVault's detector, gate on binder photos, write to the local folder."
+run = "uv run --no-sync python -m cardid.retrain --env-file ~/.config/cardid/mtgvault.env"
+
+[tasks.compare]
+description = "Compare two bundles on binder photos and synthetic binder glare (--bundle baseline --bundle candidate)."
+run = "uv run --no-sync python -m cardid.compare"
+
+[tasks.label-photos]
+description = "Label phone photos of binder pages (eval only) in the capture page at http://localhost:8765."
+run = "uv run --no-sync python -m cardid.capture --photos --checkpoint models/recogniser.pt --detector models/detector.pt"

@@ -128,5 +128,29 @@ class CompareTest(unittest.TestCase):
         self.assertTrue(out.getvalue().strip().endswith("PASS"))
 
 
+class FetchTest(unittest.TestCase):
+    def test_fetch_copies_the_current_bundle_by_version(self):
+        from .publish import REQUIRED
+        from .workflow import sha256
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bundle = root / "server" / "v1"
+            bundle.mkdir(parents=True)
+            files = {}
+            for name in REQUIRED:
+                if name not in ("manifest.json", "SHA256SUMS"):
+                    (bundle / name).write_bytes(name.encode())
+                    files[name] = {"sha256": sha256(bundle / name)}
+            (bundle / "manifest.json").write_text(json.dumps({"version": "v1", "files": files}))
+            (root / "server" / "current").symlink_to("v1")
+            with redirect_stdout(io.StringIO()):
+                target = compare.fetch(str(root / "server"), root / "bundles")
+                again = compare.fetch(str(root / "server"), root / "bundles")
+            self.assertEqual((target, again), (root / "bundles" / "v1", root / "bundles" / "v1"))
+            self.assertEqual(json.loads((target / "manifest.json").read_text())["version"], "v1")
+            self.assertEqual([p.name for p in (root / "bundles").iterdir()], ["v1"])
+
+
 if __name__ == "__main__":
     unittest.main()

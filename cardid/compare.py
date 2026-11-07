@@ -2,6 +2,7 @@
 
     uv run python -m cardid.compare --bundle <baseline> --bundle <candidate>
     uv run python -m cardid.compare --bundle ~/manavault-bundle --bundle data/bundles/<version> --json data/compare.json
+    uv run python -m cardid.compare --fetch github:cfbender/manavault   # ManaVault's current bundle -> data/bundles/<version>
 
 Both bundles answer the same queries end to end (detector.onnx, embed.onnx, search.onnx):
 
@@ -181,15 +182,36 @@ def print_report(report: dict) -> None:
     print("PASS" if report["passed"] else "FAIL")
 
 
+def fetch(source: str, bundles: Path) -> Path:
+    """Copy and check the current bundle at `source` (github:OWNER/REPO, a folder with `current`,
+    or host:/path) into `bundles/<version>`; an existing copy of that version is kept."""
+    import shutil
+    import tempfile
+
+    from .workflow import snapshot_bundle
+
+    bundles.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=bundles, prefix=".fetch-") as tmp:
+        snapshot, manifest, _ = snapshot_bundle(source if source.startswith("github:") else source.rstrip("/") + "/current", Path(tmp))
+        target = bundles / manifest["version"]
+        if not target.exists():
+            shutil.move(str(snapshot), target)
+    return target
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--bundle", action="append", type=Path, required=True, help="baseline first, then candidate")
+    parser.add_argument("--bundle", action="append", type=Path, help="baseline first, then candidate")
+    parser.add_argument("--fetch", metavar="SOURCE", help="download the current bundle from SOURCE (e.g. github:cfbender/manavault) into data/bundles and exit")
     parser.add_argument("--cards", type=int, default=300, help="eval-split cards to render scenes of (default 300)")
     parser.add_argument("--per-card", type=int, default=1, help="scenes per card and set (default 1)")
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--json", type=Path, help="also write the report here")
     args = parser.parse_args(argv)
-    if len(args.bundle) != 2:
+    if args.fetch:
+        print(fetch(args.fetch, DATA_DIR / "bundles"))
+        return
+    if not args.bundle or len(args.bundle) != 2:
         parser.error("pass exactly two --bundle: the baseline, then the candidate")
     for path in args.bundle:
         if not (path / "manifest.json").is_file():

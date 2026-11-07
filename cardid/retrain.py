@@ -18,6 +18,7 @@ from pathlib import Path
 
 from . import DATA_DIR, ML_DIR, profiles, sources
 from .corrections import atomic_json, latest_labels
+from .degrade import PROFILES
 from .envfile import load_env
 from .gallery import printing_index
 from .scene_geometry import trusted_quad
@@ -63,6 +64,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="also fine-tune the detector (off by default; CARDID_DETECTOR_EPOCHS); scenes follow CARDID_SCENE_PROFILE",
     )
     parser.add_argument("--workers", type=positive, default=os.environ.get("CARDID_WORKERS"))
+    parser.add_argument(
+        "--degradation",
+        default=os.environ.get("CARDID_DEGRADATION") or None,
+        help="synthetic degradation for cardid.train (CARDID_DEGRADATION; harsh-binder for MTG Vault's binder model)",
+    )
+    parser.add_argument(
+        "--detector-onnx",
+        type=Path,
+        default=os.environ.get("CARDID_DETECTOR_ONNX") or None,
+        help="ship this detector graph unchanged instead of exporting the detector (CARDID_DETECTOR_ONNX)",
+    )
     parser.add_argument("--update-gallery", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument(
         "--gallery-only",
@@ -78,6 +90,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="comma-separated real capture sources to train and evaluate on (webcam-table, manavault-scanner, capture); default all",
     )
     args = parser.parse_args(argv)
+    if args.degradation and args.degradation not in PROFILES:
+        parser.error(f"unknown degradation {args.degradation!r}; expected one of {', '.join(sorted(PROFILES))}")
+    if args.detector_onnx and not args.dry_run and not args.detector_onnx.expanduser().is_file():
+        parser.error(f"detector graph {args.detector_onnx} does not exist (CARDID_DETECTOR_ONNX)")
     if args.sources:
         # Child train/evaluate processes read the same filter from the environment.
         os.environ[sources.ENV] = args.sources
@@ -122,6 +138,8 @@ def run(args: argparse.Namespace, *, data: Path = DATA_DIR, runner=command, scor
         "force": args.force,
         "publish_to": args.to,
         "no_publish": args.no_publish,
+        "degradation": args.degradation,
+        "detector_onnx": str(args.detector_onnx) if args.detector_onnx else None,
     }
 
     def execute(*cmd: str, read_only: bool = False) -> None:
@@ -205,6 +223,8 @@ def run(args: argparse.Namespace, *, data: Path = DATA_DIR, runner=command, scor
                 training_options = ["--workers", str(args.workers)] if args.workers else []
                 if real_train:
                     training_options += ["--real"]
+                if args.degradation:
+                    training_options += ["--degradation", args.degradation]
                 execute("python", "-m", "cardid.train", "--resume", str(checkpoint), "--epochs", str(args.epochs), "--run", version, *training_options)
                 candidate_checkpoint = model_output(version, "candidate_checkpoint")
             if args.detector_epochs and not args.gallery_only:
@@ -232,8 +252,20 @@ def run(args: argparse.Namespace, *, data: Path = DATA_DIR, runner=command, scor
                 )
                 candidate_detector = model_output(detector_run, "candidate_detector")
             bundle = data / "bundles" / version
+            reused = ["--detector-onnx", str(args.detector_onnx.expanduser())] if args.detector_onnx else []
             execute(
-                "python", "-m", "cardid.export", "--checkpoint", candidate_checkpoint, "--detector", candidate_detector, "--version", version, "--verify", "64"
+                "python",
+                "-m",
+                "cardid.export",
+                "--checkpoint",
+                candidate_checkpoint,
+                "--detector",
+                candidate_detector,
+                "--version",
+                version,
+                "--verify",
+                "64",
+                *reused,
             )
             allowed = True
             if baseline_path:
@@ -255,6 +287,8 @@ def run(args: argparse.Namespace, *, data: Path = DATA_DIR, runner=command, scor
                     raise SystemExit("refusing incomparable held-out evaluation")
             if not args.gallery_only:  # an unchanged checkpoint has unchanged synthetic metrics
                 execute("python", "-m", "cardid.evaluate", "--method", "checkpoint", "--checkpoint", candidate_checkpoint, "--profile", "realistic")
+                if args.degradation and PROFILES[args.degradation].binder_p:
+                    execute("python", "-m", "cardid.evaluate", "--method", "checkpoint", "--checkpoint", candidate_checkpoint, "--profile", "binder")
             if fingerprint(usable_rows(data)) != fingerprint(rows):
                 raise SystemExit("real dataset changed during training; refusing publication")
             report.update(candidate_checkpoint=candidate_checkpoint, candidate_detector=candidate_detector)
