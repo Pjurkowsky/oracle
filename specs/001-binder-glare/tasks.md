@@ -4,8 +4,8 @@ Spec: [spec.md](spec.md) · Plan: [plan.md](plan.md)
 
 ## Phase 1: Training
 
-- [ ] **T1 Binder glare, degradation profiles, train flag, preview** (AC-1, AC-2)
-- [ ] **T2 cuda extra and lock** (AC-3)
+- [x] **T1 Binder glare, degradation profiles, train flag, preview** (AC-1, AC-2)
+- [x] **T2 cuda extra and lock** (AC-3)
 
 ## Phase 2: Measuring
 

@@ -10,6 +10,9 @@ then chosen by top-1 on usable held-out real captures, or synthetic queries if n
 Token arts (`token`, `double_faced_token` and `emblem` layouts) are ~3% of the gallery; `--token-repeat`
 (default 3) gives each of them that many pairs per epoch so they are ~9% of the synthetic pairs.
 
+`--degradation harsh-binder` adds binder glare (hot spots, pocket haze, overexposure; see
+`degrade.binder_glare`) to ~30% of the synthetic pairs, for MTG Vault's binder scanning.
+
 Checkpoints to data/runs/<run>/{last,best}.pt; "best" is by eval top-1 on a fixed query set
 drawn from the eval split (unseen arts), which is also what evaluate.py reports.
 """
@@ -27,6 +30,7 @@ from tqdm import tqdm
 
 from . import RUNS_DIR
 from .data import TOKEN_LAYOUTS, TOKEN_REPEAT, PairDataset, art_frames, cached_eval_queries, gallery_images, load_arts, split
+from .degrade import PROFILES
 from .evaluate import cosine_topk, embed_images, frame_topk
 from .gallery import printing_index
 from .model import ArcFaceHead, Embedder, info_nce
@@ -74,6 +78,12 @@ def main() -> None:
         default=TOKEN_REPEAT,
         help=f"pairs per epoch for each token art (default {TOKEN_REPEAT}; 1 samples tokens like any art)",
     )
+    parser.add_argument(
+        "--degradation",
+        choices=sorted(PROFILES),
+        default="harsh",
+        help="synthetic degradation of the training pairs (default harsh; harsh-binder adds binder glare to ~30%%)",
+    )
     args = parser.parse_args()
     if args.real and args.arcface > 0:
         parser.error("--real cannot be combined with --arcface (real labels may fall outside the train split)")
@@ -85,9 +95,9 @@ def main() -> None:
     write_run_metadata(run_dir, args, runtime)
     arts = load_arts()
     train_arts = split(arts, "train")
-    dataset = PairDataset(train_arts, seed=args.seed, token_repeat=args.token_repeat)
+    dataset = PairDataset(train_arts, cfg=PROFILES[args.degradation], seed=args.seed, token_repeat=args.token_repeat)
     tokens = int(sum(a.get("layout") in TOKEN_LAYOUTS for a in train_arts))
-    print(f"synthetic pairs: {len(dataset)} per epoch ({tokens} token arts x{args.token_repeat})")
+    print(f"synthetic pairs: {len(dataset)} per epoch ({tokens} token arts x{args.token_repeat}), degradation {args.degradation}")
     train_set = dataset
     real_sets = []
     if args.real:
@@ -99,7 +109,8 @@ def main() -> None:
     loader = make_loader(train_set, args.batch, runtime)
 
     gallery = gallery_images(arts)
-    queries, targets, _ = cached_eval_queries(arts)
+    # the same mix of degradation the model trains on (harsh-binder: ~30% of queries glared)
+    queries, targets, _ = cached_eval_queries(arts, profile=args.degradation)
     # Subsample queries during training so each epoch's eval is cheap.
     sel = np.random.default_rng(0).choice(len(queries), size=min(1000, len(queries)), replace=False)
     queries, targets = queries[sel], targets[sel]
