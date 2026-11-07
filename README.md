@@ -30,11 +30,16 @@ Flags after `--` go to every run, for example `--no-publish` or `--profile manav
 
 One app at a time: `mise run gathering` or `mise run manavault`.
 
+**MTG Vault's binder model** (a third line, trained on binder glare and written to a local
+folder MTG Vault installs from): `mise run label-photos`, `mise run mtgvault`, `mise run compare`.
+Setup on an NVIDIA desktop (`uv sync --extra cuda`) and the whole flow are in
+[docs/binder-glare.md](docs/binder-glare.md).
+
 ## Training box setup
 
 ```sh
 git clone git@github.com:cfbender/oracle.git && cd oracle
-mise install && mise exec -- uv sync --extra rocm    # --extra cpu without an AMD GPU
+mise install && mise exec -- uv sync --extra rocm    # --extra cuda on NVIDIA, --extra cpu without a GPU
 export UV_NO_SYNC=1                                  # keep the installed torch extra
 gh auth login                                        # needed to publish both apps' releases
 mise run setup-profiles                              # creates ~/.config/cardid/{manavault,the-gathering}.env
@@ -70,6 +75,8 @@ a fresh clone can fine-tune, evaluate or export without training from scratch.
   new sets, publishing, the optional nightly loop.
 - [docs/training.md](docs/training.md): manual training, evaluation, real captures, the detector,
   GPU setup, code layout.
+- [docs/binder-glare.md](docs/binder-glare.md): MTG Vault's binder-glare model: NVIDIA setup, labelling
+  binder photos, training, comparing with ManaVault's bundle, handing bundles to MTG Vault.
 - [docs/pipeline.md](docs/pipeline.md): how recognition works, the gallery, frame, token and
   layout geometry, hub arts, the bundle format and manifest, and ManaVault's optional search
   mask (`search.onnx` input `mask`, manifest `search_mask`).

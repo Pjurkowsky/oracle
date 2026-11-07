@@ -13,6 +13,7 @@ uv run python -m cardid.scryfall --all                      # every artwork (~52
 uv run python -m cardid.scryfall --metadata                 # refresh printings from the cached bulk file, no art downloads
 uv run python -m cardid.scryfall --cards 3000 --two-part-cards   # full-card scans for detector scenes
 uv run python -m cardid.degrade <art_id>                    # see the synthetic degradation
+uv run python -m cardid.degrade <art_id> --degradation binder   # with binder glare
 ```
 
 The eval split is never trained on, so its score measures unseen cards. Numbers from the 6k
@@ -116,7 +117,9 @@ needs `--allow-remote`, and browsers grant cameras only on localhost or HTTPS.
   export it as `1` to try the faster path.
 - **Apple silicon:** `--extra cpu` includes Metal. Use `PYTORCH_ENABLE_MPS_FALLBACK=1` if an op
   is unsupported.
-- **NVIDIA:** there is no `cuda` extra yet.
+- **NVIDIA (RTX 20 series and newer, Linux):** `uv sync --extra cuda` installs PyTorch's CUDA 12.6
+  wheels; the driver must be 525 or newer. It appears as `cuda`. Setup for MTG Vault's binder
+  model is in [binder-glare.md](binder-glare.md).
 
 Checkpoints are saved as CPU tensors, so `capture`, `bench` and `export` run on CPU-only installs.
 

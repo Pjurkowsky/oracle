@@ -8,7 +8,7 @@ Spec: [spec.md](spec.md)
 | Profiles | `Degradation.binder_p`; `harsh-binder` = harsh + 0.3 (training), `binder` = realistic + 1.0 (eval). `train --degradation`. |
 | CUDA | `cuda` extra on the PyTorch cu126 index, conflicting with `cpu` and `rocm`. |
 | Photo mode | `capture --photos`: `/mode` tells the page; page draws the picked file letterboxed into a 640 canvas (rgb 18) and crops from it. Server saves `source: binder-photos`, `split: eval`. |
-| Compare | `cardid.compare`: real rows = eval labels with source `binder-photos`, scored with `workflow.score` on labels both bundles know. Synthetic: `render_phone_scene(out=640)` of eval-split scans, plus `binder_glare` masked to the card quad for `binder`; same seed for both bundles; `Bundle.identify` at the card centre. |
+| Compare | `cardid.compare`: real rows = eval labels with source `binder-photos`, scored with `workflow.score` on labels both bundles know. Synthetic: `render_phone_scene(out=640)` of eval-split scans, plus `binder_glare` masked to the card quad for `binder`; same seed for both bundles; `Bundle.identify` at the frame centre, as the scanner reads it. `--fetch` downloads a baseline with `workflow.snapshot_bundle`. |
 | Detector reuse | `export --detector-onnx`: copy the file over `detector.onnx`, manifest `detector.onnx_source`/`onnx_sha256`; verify compares recognition on the bundle's own quad. |
 | Profile | `profiles/mtgvault.env.example`; retrain reads `CARDID_DEGRADATION` and `CARDID_DETECTOR_ONNX`. |
 
@@ -21,7 +21,7 @@ Spec: [spec.md](spec.md)
 - `cardid/compare.py`: new
 - `cardid/export.py`: `--detector-onnx`
 - `cardid/retrain.py`: profile options
-- `profiles/mtgvault.env.example`, `mise.toml` (`setup-profiles`, `compare` task)
+- `profiles/mtgvault.env.example`, `mise.toml` (`setup-mtgvault`, `mtgvault`, `compare`, `label-photos`)
 - `docs/binder-glare.md`, `docs/training.md`, `README.md`
 
 ## Tests

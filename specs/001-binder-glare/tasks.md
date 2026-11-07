@@ -19,4 +19,4 @@ Spec: [spec.md](spec.md) · Plan: [plan.md](plan.md)
 
 ## Phase 4: Finish
 
-- [ ] **T7 Tests, full suite, ruff, docs (binder-glare guide, training, README), spec status** (AC-11)
+- [x] **T7 Tests, full suite, ruff, docs (binder-glare guide, training, README), spec status** (AC-11)

@@ -1,6 +1,6 @@
 # Spec 001: Training the scanner model on binder glare
 
-Status: Draft
+Status: Done
 Followed by: MTG Vault 020-scanner-model-source
 
 ## Goal

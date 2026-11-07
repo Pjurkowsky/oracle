@@ -15,9 +15,11 @@ Both apps start from the same `models/` weights but get their own model. Each ap
 | `CARDID_CORRECTIONS_TOKEN` | the server's read-only export token (ManaVault: `SCANNER_CORRECTIONS_TOKEN`) |
 | `CARDID_CORRECTIONS_DIR` | instead of a server: a mounted or rsynced corrections export |
 | `CARDID_PUBLISH_TO` | `user@host:/path` (ssh), a local directory, or `github:OWNER/REPO` |
-| `CARDID_SOURCES` | real capture sources to train and gate on: `webcam-table`, `capture`, `manavault-scanner` |
+| `CARDID_SOURCES` | real capture sources to train and gate on: `webcam-table`, `capture`, `manavault-scanner`, `binder-photos` (eval only) |
 | `CARDID_CHECKPOINT`, `CARDID_DETECTOR` | extra search hints for starting checkpoints (default `models/`) |
 | `CARDID_DETECTOR_EPOCHS`, `CARDID_SCENE_PROFILE` | also fine-tune the detector, on `table` or `phone` scenes |
+| `CARDID_DEGRADATION` | synthetic degradation for training: `harsh-binder` adds binder glare (MTG Vault) |
+| `CARDID_DETECTOR_ONNX` | ship this detector graph unchanged instead of exporting one (MTG Vault reuses ManaVault's) |
 | `CARDID_RETRAIN_EPOCHS`, `CARDID_WORKERS` | recogniser epochs (default 4) and loader workers |
 | `CARDID_SEARCH_MASK` | `1`: export `search.onnx` with the gallery `mask` input (ManaVault only; The Gathering feeds only `embeddings`) |
 
