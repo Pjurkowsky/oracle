@@ -12,6 +12,12 @@ automatic quad is wrong or missing; this works for tilted and tapped cards, unli
 With `--detector`, the quad comes from the learned `cardid.detector` (always returns one);
 without it, from the classical edge finder in `cardid.detect`.
 
+With `--photos` the page opens phone photos you pick instead of the webcam (binder pages for
+spec 001): each is fitted into a 640 px square with dark bars, as MTG Vault's scanner fits its
+camera frames, and you click and label each card the same way; N and P move between photos.
+Those labels are source `binder-photos` and always in the eval split, never trained on. The
+photos stay in the browser; only the crop around each click reaches the server.
+
 Everything labeled lands in data/real/ (see `cardid.real`) for `train --real` and
 `evaluate --real`. The page keeps a running top-1/top-5 over what you have labeled.
 
@@ -55,6 +61,7 @@ from .detect import (
 from .detector import Detector, cyclic_order
 from .index import ArtIndex
 from .real import load_labels, save_label
+from .sources import BINDER_PHOTOS
 
 PAGE = Path(__file__).with_name("capture.html")
 
@@ -62,8 +69,9 @@ PAGE = Path(__file__).with_name("capture.html")
 class Session:
     """Server-side state: the index plus captures that are identified but not yet labeled."""
 
-    def __init__(self, checkpoint: Path, detector: Path | None = None, frame_penalty: float = FRAME_PENALTY):
+    def __init__(self, checkpoint: Path, detector: Path | None = None, frame_penalty: float = FRAME_PENALTY, photos: bool = False):
         self.index = ArtIndex(checkpoint, frame_penalty)
+        self.photos = photos
         self.detector = Detector(detector) if detector else None
         self.pending: dict[str, dict] = {}
         self.lock = threading.Lock()
@@ -133,8 +141,9 @@ class Session:
             p = self.pending.pop(capture_id, None)
         if p is None:
             raise KeyError(capture_id)
+        origin = {"source": BINDER_PHOTOS, "split": "eval"} if self.photos else {}
         if label is None:
-            row = {"label": None, "method": method, "top5": [a["id"] for a in p["top"]]}
+            row = {"label": None, "method": method, "top5": [a["id"] for a in p["top"]], **origin}
             return save_label(capture_id, row, crop_rgb=p["crop"])
         # Pick the orientation whose embedding is closest to the labeled art, so a wrong
         # top-1 on an upside-down card still stores the card the right way up.
@@ -155,6 +164,7 @@ class Session:
             "card_px": round(float(short)),
             "art_px": round(float(short) * 0.84),
             "checkpoint": str(self.index.checkpoint),
+            **origin,
         }
         if p["source"] == "detector":
             # the detector said index 0 was upright; the labeled art says which really was
@@ -383,6 +393,8 @@ def make_handler(session: Session, allow_remote: bool = False):
                     self.send_bytes(p.read_bytes(), "image/jpeg")
                 else:
                     self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+            elif url.path == "/mode":
+                self.send_json({"photos": session.photos})
             elif url.path == "/stats":
                 self.send_json(session.stats())
             elif url.path == "/search":
@@ -434,6 +446,11 @@ def main() -> None:
         default=FRAME_PENALTY,
         help=f"similarity penalty for rare-frame (tall/saga/class) arts, 0 disables the frame prior (default {FRAME_PENALTY})",
     )
+    parser.add_argument(
+        "--photos",
+        action="store_true",
+        help="label phone photos picked in the page instead of the webcam; saved as source binder-photos, eval split only",
+    )
     args = parser.parse_args()
     remote = not loopback_host(args.host)
     if remote and not args.allow_remote:
@@ -444,10 +461,11 @@ def main() -> None:
             "Host-header checks are off; cross-origin requests are still refused. Browsers only allow the camera on localhost or HTTPS."
         )
     torch.set_num_threads(2)
-    session = Session(Path(args.checkpoint), Path(args.detector) if args.detector else None, args.frame_penalty)
+    session = Session(Path(args.checkpoint), Path(args.detector) if args.detector else None, args.frame_penalty, photos=args.photos)
     server = ThreadingHTTPServer((args.host, args.port), make_handler(session, allow_remote=remote))
     locator = f"detector {args.detector}" if args.detector else "classical edge finder"
-    print(f"gallery: {len(session.index.arts)} arts; quads from {locator}; open http://{args.host}:{args.port}")
+    mode = "; photo mode (binder-photos, eval only)" if args.photos else ""
+    print(f"gallery: {len(session.index.arts)} arts; quads from {locator}{mode}; open http://{args.host}:{args.port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

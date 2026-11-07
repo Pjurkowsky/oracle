@@ -7,7 +7,9 @@
   :root { color-scheme: dark; font-family: system-ui, sans-serif; }
   body { margin: 0; background: #14161a; color: #e6e6e6; display: grid; grid-template-columns: 1fr 380px; height: 100vh; }
   #stage { position: relative; display: flex; align-items: center; justify-content: center; background: #000; overflow: hidden; }
-  video { max-width: 100%; max-height: 100vh; display: block; cursor: crosshair; }
+  video, #photo { max-width: 100%; max-height: 100vh; display: block; cursor: crosshair; }
+  #photo { width: min(100%, 100vh); height: auto; }
+  [hidden] { display: none !important; }
   #overlay { position: absolute; pointer-events: none; }
   aside { padding: 12px 14px; overflow-y: auto; border-left: 1px solid #2a2d33; font-size: 14px; }
   h1 { font-size: 15px; margin: 0 0 8px; font-weight: 600; }
@@ -35,13 +37,22 @@
 <body>
 <div id="stage">
   <video id="video" autoplay playsinline muted></video>
+  <canvas id="photo" width="640" height="640" hidden></canvas>
   <canvas id="overlay"></canvas>
 </div>
 <aside>
   <h1>cardid capture</h1>
-  <div class="row" style="margin-bottom:8px">
+  <div class="row" style="margin-bottom:8px" id="camerabar">
     <select id="devices"></select>
     <span id="res" class="muted"></span>
+  </div>
+  <div id="photobar" hidden style="margin-bottom:8px">
+    <input id="files" type="file" accept="image/*" multiple>
+    <div class="row" style="margin-top:6px; align-items:center">
+      <button id="prev">◀ <kbd>P</kbd></button>
+      <span id="pname" class="muted">pick binder photos</span>
+      <button id="next"><kbd>N</kbd> ▶</button>
+    </div>
   </div>
   <div class="stats">
     <div><b id="s-labeled">0</b><span class="muted">labeled</span></div>
@@ -66,6 +77,12 @@ const results = document.getElementById('results');
 const q = document.getElementById('q');
 const devices = document.getElementById('devices');
 const CROP = 640; // native pixels around the click sent to the server
+const FRAME = 640; // photo mode: MTG Vault's scanner fits each camera frame into this square
+const photo = document.getElementById('photo');
+let view = video;        // what is clicked: the webcam, or in photo mode the letterboxed photo
+let photos = [], photoAt = 0;
+const srcW = () => view === video ? video.videoWidth : view.width;
+const srcH = () => view === video ? video.videoHeight : view.height;
 
 let current = null;      // {capture_id, candidates, quad, cropOrigin}
 let corners = [];        // native-pixel corners of a manual outline in progress
@@ -92,34 +109,34 @@ async function start(deviceId) {
 devices.onchange = () => start(devices.value);
 window.onresize = sizeOverlay;
 function sizeOverlay() {
-  const r = video.getBoundingClientRect(), s = overlay.parentElement.getBoundingClientRect();
+  const r = view.getBoundingClientRect(), s = overlay.parentElement.getBoundingClientRect();
   overlay.width = r.width; overlay.height = r.height;
   overlay.style.left = (r.left - s.left) + 'px'; overlay.style.top = (r.top - s.top) + 'px';
 }
 
 // display coords -> native video pixels
 function toNative(e) {
-  const r = video.getBoundingClientRect();
-  return [(e.clientX - r.left) * video.videoWidth / r.width, (e.clientY - r.top) * video.videoHeight / r.height];
+  const r = view.getBoundingClientRect();
+  return [(e.clientX - r.left) * srcW() / r.width, (e.clientY - r.top) * srcH() / r.height];
 }
 function toDisplay(x, y) {
-  const r = video.getBoundingClientRect();
-  return [x * r.width / video.videoWidth, y * r.height / video.videoHeight];
+  const r = view.getBoundingClientRect();
+  return [x * r.width / srcW(), y * r.height / srcH()];
 }
 
 function grab(cx, cy, size) {
-  const w = video.videoWidth, h = video.videoHeight;
+  const w = srcW(), h = srcH();
   const half = size / 2;
   const x0 = Math.max(0, Math.min(w - size, Math.round(cx - half)));
   const y0 = Math.max(0, Math.min(h - size, Math.round(cy - half)));
   const sw = Math.min(size, w), sh = Math.min(size, h);
   const c = document.createElement('canvas');
   c.width = sw; c.height = sh;
-  c.getContext('2d').drawImage(video, x0, y0, sw, sh, 0, 0, sw, sh);
+  c.getContext('2d').drawImage(view, x0, y0, sw, sh, 0, 0, sw, sh);
   return { data: c.toDataURL('image/jpeg', 0.92), x0, y0 };
 }
 
-video.addEventListener('mousedown', e => {
+function onDown(e) {
   if (!e.shiftKey) return;
   e.preventDefault();
   corners.push(toNative(e));
@@ -128,12 +145,38 @@ video.addEventListener('mousedown', e => {
   const quad = corners; corners = [];
   const cx = quad.reduce((a, p) => a + p[0], 0) / 4, cy = quad.reduce((a, p) => a + p[1], 0) / 4;
   identify(cx, cy, quad);
-});
-video.addEventListener('mouseup', e => {
+}
+function onUp(e) {
   if (e.shiftKey || corners.length) return;
   const [x, y] = toNative(e);
   identify(x, y, null);
-});
+}
+for (const el of [video, photo]) { el.addEventListener('mousedown', onDown); el.addEventListener('mouseup', onUp); }
+
+// photo mode: draw the photo into the FRAME square with dark bars, exactly as the scanner does
+async function showPhoto(i) {
+  if (!photos.length) return;
+  photoAt = (i + photos.length) % photos.length;
+  const file = photos[photoAt];
+  const img = await createImageBitmap(file, { imageOrientation: 'from-image' });
+  const ctx = photo.getContext('2d');
+  const scale = FRAME / Math.max(img.width, img.height);
+  const w = img.width * scale, h = img.height * scale;
+  ctx.fillStyle = 'rgb(18, 18, 18)';
+  ctx.fillRect(0, 0, FRAME, FRAME);
+  ctx.drawImage(img, (FRAME - w) / 2, (FRAME - h) / 2, w, h);
+  img.close();
+  current = null; corners = []; cands.innerHTML = ''; results.innerHTML = '';
+  document.getElementById('pname').textContent = `${photoAt + 1}/${photos.length} ${file.name}`;
+  sizeOverlay(); drawOverlay();
+  setStatus('Click each card in the photo and label it. N/P: next/previous photo.');
+}
+document.getElementById('files').onchange = e => {
+  photos = [...e.target.files].sort((a, b) => a.name.localeCompare(b.name));
+  showPhoto(0);
+};
+document.getElementById('prev').onclick = () => showPhoto(photoAt - 1);
+document.getElementById('next').onclick = () => showPhoto(photoAt + 1);
 
 async function identify(x, y, quad) {
   let size = CROP;
@@ -233,6 +276,8 @@ document.addEventListener('keydown', e => {
   else if (e.key === 's' || e.key === 'S') label(null, 'skip');
   else if (e.key === 'f' || e.key === 'F') flipOrientation();
   else if (e.key === '/') { e.preventDefault(); q.focus(); }
+  else if (view === photo && (e.key === 'n' || e.key === 'N')) showPhoto(photoAt + 1);
+  else if (view === photo && (e.key === 'p' || e.key === 'P')) showPhoto(photoAt - 1);
 });
 
 function drawOverlay() {
@@ -258,7 +303,15 @@ function setStatus(msg, err) { status.textContent = msg; status.className = err 
 function esc(s) { return s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
 fetch('/stats').then(r => r.json()).then(updateStats);
-start().catch(e => setStatus('camera: ' + e.message, true));
+fetch('/mode').then(r => r.json()).then(mode => {
+  if (!mode.photos) return start().catch(e => setStatus('camera: ' + e.message, true));
+  view = photo;
+  video.hidden = true; photo.hidden = false;
+  document.getElementById('camerabar').hidden = true;
+  document.getElementById('photobar').hidden = false;
+  sizeOverlay();
+  setStatus('Photo mode: pick your binder photos (labels are eval only, never trained on).');
+});
 </script>
 </body>
 </html>

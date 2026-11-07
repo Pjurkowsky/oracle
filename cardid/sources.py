@@ -1,8 +1,8 @@
 """Which real captures a model line trains and evaluates on.
 
 Real captures come from several places: The Gathering's webcam table (`webcam-table`),
-ManaVault's phone scanner (`manavault-scanner`) and the local `cardid.capture` tool (rows
-without a source, called `capture` here). All of them land in data/real/. Set
+ManaVault's phone scanner (`manavault-scanner`), the local `cardid.capture` tool (rows
+without a source, called `capture` here) and its photo mode (`binder-photos`, eval only). All of them land in data/real/. Set
 `CARDID_SOURCES` to a comma-separated list to train and evaluate a model line on only those,
 for example `CARDID_SOURCES=manavault-scanner` for ManaVault's phone model. Unset uses all.
 """
@@ -13,6 +13,10 @@ import os
 
 ENV = "CARDID_SOURCES"
 LOCAL = "capture"
+# Phone photos of binder pages labelled with `cardid.capture --photos` (spec 001): a fixed test
+# set, so they are always in the eval split and never trained on.
+BINDER_PHOTOS = "binder-photos"
+EVAL_ONLY = frozenset({BINDER_PHOTOS})
 
 
 def row_source(row: dict) -> str:

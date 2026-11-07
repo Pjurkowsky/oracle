@@ -9,7 +9,7 @@ Spec: [spec.md](spec.md) · Plan: [plan.md](plan.md)
 
 ## Phase 2: Measuring
 
-- [ ] **T3 capture --photos: photo picker, letterbox, source and eval split** (AC-4, AC-5)
+- [x] **T3 capture --photos: photo picker, letterbox, source and eval split** (AC-4, AC-5)
 - [ ] **T4 cardid.compare: binder photos, synthetic binder and realistic, PASS/FAIL** (AC-6 to AC-8)
 
 ## Phase 3: Bundles for MTG Vault

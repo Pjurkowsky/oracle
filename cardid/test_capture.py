@@ -5,9 +5,12 @@ from __future__ import annotations
 import base64
 import http.client
 import json
+import tempfile
 import threading
 import unittest
 from http.server import ThreadingHTTPServer
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import cv2
@@ -18,6 +21,7 @@ from . import capture
 
 class FakeSession:
     def __init__(self):
+        self.photos = False
         self.identified = []
         self.labels = []
 
@@ -172,6 +176,13 @@ class CaptureServerTest(unittest.TestCase):
         status, _ = self.post("/label", {"capture_id": "abc", "label": "x"}, Host=lan, Origin="https://evil.example")
         self.assertEqual(status, 403)
 
+    def test_mode_reports_photo_mode(self):
+        status, reply = self.request("GET", "/mode", headers={"Host": f"127.0.0.1:{self.port}"})
+        self.assertEqual((status, reply), (200, {"photos": False}))
+        self.session.photos = True
+        status, reply = self.request("GET", "/mode", headers={"Host": f"127.0.0.1:{self.port}"})
+        self.assertEqual((status, reply), (200, {"photos": True}))
+
     def test_loopback_detection(self):
         for host in ("127.0.0.1", "127.8.0.1", "::1", "[::1]", "localhost"):
             self.assertTrue(capture.loopback_host(host), host)
@@ -184,6 +195,63 @@ class CaptureServerTest(unittest.TestCase):
                 capture.main()
         self.assertEqual(raised.exception.code, 2)
         session.assert_not_called()
+
+
+class PhotoModeLabelTest(unittest.TestCase):
+    """Spec 001 AC-4, AC-5: photo-mode labels are binder-photos in the eval split."""
+
+    def session(self, photos: bool):
+        session = object.__new__(capture.Session)
+        session.photos = photos
+        session.lock = threading.Lock()
+        session.index = SimpleNamespace(
+            embeddings=np.eye(2, 4, dtype=np.float32), frames=np.zeros(2, int), by_id={"art-a": 0, "art-b": 1}, checkpoint="ckpt.pt"
+        )
+        quad = np.float32([[0, 0], [63, 0], [63, 88], [0, 88]])
+        session.pending = {
+            "c1": {
+                "crop": np.zeros((8, 8, 3), np.uint8),
+                "cards": [np.zeros((350, 250, 3), np.uint8)] * 2,
+                "vecs": np.stack([np.eye(1, 4, dtype=np.float32)[None, 0], np.eye(1, 4, dtype=np.float32)[None, 0]]),
+                "quad": quad,
+                "source": "auto",
+                "click": (4, 4),
+                "top": [{"id": "art-a", "similarity": 0.9}],
+            }
+        }
+        return session
+
+    def label(self, photos: bool, label="art-a"):
+        with patch.object(capture, "save_label", side_effect=lambda capture_id, row, **_: row) as saved:
+            row = self.session(photos).label("c1", label, "confirm")
+        saved.assert_called_once()
+        return row
+
+    def test_photo_labels_are_eval_only_binder_photos(self):
+        self.assertEqual({k: self.label(True)[k] for k in ("source", "split")}, {"source": "binder-photos", "split": "eval"})
+        self.assertEqual({k: self.label(True, None)[k] for k in ("source", "split")}, {"source": "binder-photos", "split": "eval"})
+
+    def test_webcam_labels_keep_the_hashed_split(self):
+        row = self.label(False)
+        self.assertNotIn("source", row)
+        self.assertNotIn("split", row)
+
+    def test_load_labels_never_trains_on_binder_photos(self):
+        from . import real
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            rows = [
+                {"capture_id": "p1", "split": "train", "label": "art-a", "source": "binder-photos"},
+                {"capture_id": "w1", "split": "train", "label": "art-b"},
+            ]
+            for r in rows:
+                (root / r["capture_id"]).mkdir()
+                (root / r["capture_id"] / "card.png").write_bytes(b"x")
+            (root / "labels.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+            with patch.object(real, "REAL_DIR", root), patch.object(real, "LABELS", root / "labels.jsonl"):
+                self.assertEqual([r["capture_id"] for r in real.load_labels("train")], ["w1"])
+                self.assertEqual([r["capture_id"] for r in real.load_labels("eval")], ["p1"])
 
 
 if __name__ == "__main__":
