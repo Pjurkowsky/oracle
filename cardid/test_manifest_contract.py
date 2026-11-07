@@ -194,6 +194,36 @@ class ManifestContractTest(unittest.TestCase):
         self.assertEqual((indices.shape, scores.shape), ((3,), (3,)))
         self.assertTrue(set(indices.tolist()) <= set(range(4)))
 
+    def test_detector_onnx_is_shipped_unchanged(self):
+        """Spec 001 AC-9: a reused detector graph (ManaVault's) goes into the bundle byte for byte."""
+        foreign = self.root / "foreign"
+        foreign.mkdir(exist_ok=True)
+        graph = foreign / "detector.onnx"
+        graph.write_bytes((self.bundle / "detector.onnx").read_bytes() + b"")
+        (foreign / "manifest.json").write_text(json.dumps({"constants": self.manifest["constants"]}))
+        out = self.root / "bundles" / "contract-reused-detector"
+        with patch.object(data, "DATA_DIR", self.root), patch.object(data, "ART_DIR", self.root / "art"), redirect_stdout(StringIO()):
+            export_bundle(
+                self.checkpoint, self.detector, out, frame_penalty=0.02, topk=3, gallery_dtype="f16", card_dir=self.root / "cards", detector_onnx=graph
+            )
+        manifest = json.loads((out / "manifest.json").read_text())
+        self.assertEqual((out / "detector.onnx").read_bytes(), graph.read_bytes())
+        self.assertEqual(manifest["detector"]["onnx_source"], str(graph))
+        self.assertEqual(manifest["detector"]["onnx_sha256"], manifest["files"]["detector.onnx"]["sha256"])
+        self.assertEqual(manifest["detector"]["checkpoint"], str(self.detector))
+        self.assertEqual(check_bundle(out)["version"], "contract-reused-detector")
+
+    def test_detector_onnx_with_other_constants_is_refused(self):
+        foreign = self.root / "foreign-other"
+        foreign.mkdir(exist_ok=True)
+        (foreign / "detector.onnx").write_bytes(b"graph")
+        (foreign / "manifest.json").write_text(json.dumps({"constants": {**self.manifest["constants"], "scene": 512}}))
+        out = self.root / "bundles" / "contract-refused"
+        with self.assertRaises(SystemExit) as raised, redirect_stdout(StringIO()):
+            export_bundle(self.checkpoint, self.detector, out, 0.02, 3, "f16", card_dir=self.root / "cards", detector_onnx=foreign / "detector.onnx")
+        self.assertIn("scene", str(raised.exception))
+        self.assertFalse(out.exists())
+
     def test_search_mask_is_opt_in_and_recorded_in_the_manifest(self):
         from .bundle import Bundle
 

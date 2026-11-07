@@ -32,6 +32,13 @@ pipeline: same clicks on freshly rendered scenes through `Detector.locate_up` +
 `warp_card`/`art_crops` + `ArtIndex` and through the bundle, reporting corner agreement and
 top-1 agreement.
 
+`--detector-onnx <file>` (spec 001, MTG Vault's binder model) ships that detector graph
+unchanged instead of exporting `--detector`, for example ManaVault's from its published bundle,
+whose checkpoint is not public. Its bundle's detector constants must match Oracle's. The
+manifest keeps `detector.checkpoint`/`sha256` (the local checkpoint `--verify` and retrains use)
+and adds `onnx_source`/`onnx_sha256`; `--verify` then checks recognition on the shipped
+detector's quads.
+
 New cards do not need retraining: `cardid.scryfall --update` pulls them into the gallery and
 a re-export embeds them. `cardid.publish` ships a bundle to the server.
 """
@@ -42,6 +49,7 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import time
 import warnings
 from datetime import UTC, datetime
@@ -65,6 +73,22 @@ BUNDLE_DIR = DATA_DIR / "bundles"
 SUMS = "SHA256SUMS"
 OPSET = 17
 CLEAR_MARGIN = 0.02  # torch top-1 lead over the runner-up above which the bundle must agree
+# what a detector graph's outputs depend on; a reused graph must have been exported with these
+DETECTOR_CONSTANTS = {"scene": SCENE, "det_input": DET_INPUT, "rotations": ROTATIONS, "refine_fill": REFINE_FILL, "refine_min_side": REFINE_MIN_SIDE}
+
+
+def check_detector_onnx(path: Path) -> None:
+    """Refuse a detector graph whose bundle was exported with other window geometry."""
+    if not path.is_file():
+        raise SystemExit(f"--detector-onnx {path} does not exist")
+    manifest = path.with_name("manifest.json")
+    if not manifest.is_file():
+        print(f"WARNING: no manifest.json beside {path}; cannot check its detector constants", flush=True)
+        return
+    theirs = json.loads(manifest.read_text()).get("constants", {})
+    differ = {k: (theirs.get(k), v) for k, v in DETECTOR_CONSTANTS.items() if k in theirs and not np.isclose(theirs[k], v)}
+    if differ:
+        raise SystemExit(f"--detector-onnx {path} was exported with other detector constants (theirs, ours): {differ}")
 
 
 def sha256(path: Path) -> str:
@@ -122,7 +146,10 @@ def export_bundle(
     search_mask: bool = False,
     hub_weight: float = HUB_WEIGHT,
     card_dir: Path = CARD_DIR,
+    detector_onnx: Path | None = None,
 ) -> tuple[ArtIndex, Detector]:
+    if detector_onnx is not None:
+        check_detector_onnx(detector_onnx)
     out.mkdir(parents=True, exist_ok=True)
     index = ArtIndex(checkpoint, frame_penalty)
     index.hub, hub = export_hub_penalty(index, card_dir, hub_weight)
@@ -156,6 +183,8 @@ def export_bundle(
             example += (torch.ones(len(index.embeddings)),)
             inputs.append("mask")
         export_graph(search, example, out / "search.onnx", inputs, ["indices", "scores"], fold=False)
+    if detector_onnx is not None:
+        shutil.copyfile(detector_onnx, out / "detector.onnx")
 
     arts, printings = runtime_metadata(index.arts, [FRAME_NAMES[f] for f in index.frames])
     (out / "arts.json").write_text(json.dumps(arts, separators=(",", ":")))
@@ -165,7 +194,8 @@ def export_bundle(
         "version": out.name,
         "created": datetime.now(UTC).isoformat(timespec="seconds"),
         "recogniser": {"checkpoint": str(checkpoint), "sha256": sha256(checkpoint)},
-        "detector": {"checkpoint": str(detector), "sha256": sha256(detector)},
+        "detector": {"checkpoint": str(detector), "sha256": sha256(detector)}
+        | ({"onnx_source": str(detector_onnx), "onnx_sha256": sha256(detector_onnx)} if detector_onnx is not None else {}),
         "gallery": {
             "arts": len(arts),
             "dtype": gallery_dtype,
@@ -196,21 +226,27 @@ def export_bundle(
     return index, det
 
 
-def torch_identify(index: ArtIndex, det: Detector, img: np.ndarray, click: tuple[float, float], k: int) -> tuple[np.ndarray, list[dict]]:
-    """The Python pipeline the bundle must reproduce (`capture.Session.identify`, detector path)."""
-    quad, _ = det.locate_up(img, click)
+def torch_identify(
+    index: ArtIndex, det: Detector, img: np.ndarray, click: tuple[float, float], k: int, quad: np.ndarray | None = None
+) -> tuple[np.ndarray, list[dict]]:
+    """The Python pipeline the bundle must reproduce (`capture.Session.identify`, detector path).
+    With `quad`, recognition only: embed and search the card at that quad."""
+    if quad is None:
+        quad, _ = det.locate_up(img, click)
     vecs = index.embed(art_crops(warp_card(img, quad)))
     return quad, index.search(vecs, k)
 
 
-def verify(bundle_path: Path, index: ArtIndex, det: Detector, n: int, seed: int, k: int) -> bool:
+def verify(bundle_path: Path, index: ArtIndex, det: Detector, n: int, seed: int, k: int, same_detector: bool = True) -> bool:
     """Compare the bundle with the torch pipeline on `n` rendered scenes, clicking a random
     point on the card. The two differ only in sub-pixel resampling (OpenCV's fixed-point
     bilinear against GridSample), which can flip a near-tie between two gallery arts or, rarely,
     snap a corner to a different heatmap peak (a one-level pixel difference in the refine
     window is enough). Passes when the median corner error is under a pixel and the top-1
     agrees on at least 97% of the scenes where the torch pipeline's top-1 leads its runner-up
-    by more than `CLEAR_MARGIN`; every disagreement is listed."""
+    by more than `CLEAR_MARGIN`; every disagreement is listed. Without `same_detector` (a reused
+    detector graph) the torch side embeds the card at the bundle's own quad, so only recognition
+    is compared."""
     from .bundle import Bundle
     from .image_bank import ArtBank, CardBank
     from .scene_renderer import render_scene
@@ -225,8 +261,8 @@ def verify(bundle_path: Path, index: ArtIndex, det: Detector, n: int, seed: int,
         scene, quad = render_scene(rng, cards, arts, out=SCENE)
         centre = quad.mean(axis=0) + rng.uniform(-0.2, 0.2, size=2) * np.linalg.norm(quad[1] - quad[0])
         click = (float(centre[0]), float(centre[1]))
-        ref_quad, ref_top = torch_identify(index, det, scene, click, k)
         got = bundle.identify(scene, click)
+        ref_quad, ref_top = torch_identify(index, det, scene, click, k, None if same_detector else got["quad"])
         corner_err.append(float(np.abs(got["quad"] - ref_quad).max()))
         agree = got["results"][0]["id"] == ref_top[0]["id"]
         is_clear = ref_top[0]["similarity"] - ref_top[1]["similarity"] > CLEAR_MARGIN
@@ -272,6 +308,12 @@ def main() -> None:
     parser.add_argument(
         "--hub-weight", type=float, default=HUB_WEIGHT, help=f"hub penalty weight (default {HUB_WEIGHT}; 0 disables); needs scans in data/cards"
     )
+    parser.add_argument(
+        "--detector-onnx",
+        type=Path,
+        default=os.environ.get("CARDID_DETECTOR_ONNX") or None,
+        help="ship this detector graph unchanged (e.g. ManaVault's) instead of exporting --detector (default: CARDID_DETECTOR_ONNX)",
+    )
     parser.add_argument("--verify", type=int, default=64, help="rendered scenes to compare against the torch pipeline (0 to skip)")
     parser.add_argument("--seed", type=int, default=2026)
     args = parser.parse_args()
@@ -284,8 +326,10 @@ def main() -> None:
             f"{out} already exists; a published version is immutable, so export with a new --version "
             "(the default now includes the time) or pass --force to overwrite a bundle that was never published"
         )
-    index, det = export_bundle(checkpoint, detector, out, args.frame_penalty, args.topk, args.gallery_dtype, args.search_mask, args.hub_weight)
-    if args.verify and not verify(out, index, det, args.verify, args.seed, args.topk):
+    index, det = export_bundle(
+        checkpoint, detector, out, args.frame_penalty, args.topk, args.gallery_dtype, args.search_mask, args.hub_weight, detector_onnx=args.detector_onnx
+    )
+    if args.verify and not verify(out, index, det, args.verify, args.seed, args.topk, same_detector=args.detector_onnx is None):
         raise SystemExit(1)
 
 

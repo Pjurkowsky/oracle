@@ -14,7 +14,7 @@ Spec: [spec.md](spec.md) · Plan: [plan.md](plan.md)
 
 ## Phase 3: Bundles for MTG Vault
 
-- [ ] **T5 export --detector-onnx** (AC-9)
+- [x] **T5 export --detector-onnx** (AC-9)
 - [ ] **T6 mtgvault profile, retrain options, mise tasks** (AC-10)
 
 ## Phase 4: Finish
